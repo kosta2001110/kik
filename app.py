@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, request, redirect, url_for
+from flask import Flask, render_template_string, request, jsonify
 import os
 import requests
 from datetime import datetime
@@ -11,253 +11,363 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///orders.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-# URL вебхука
+# Discord вебхук
 WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 
 # Модель заказа
 class Order(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
-    email = db.Column(db.String(100), nullable=False)
-    phone = db.Column(db.String(20), default='Не указан')
-    service = db.Column(db.String(200), nullable=False)
+    contact = db.Column(db.String(100), nullable=False)  # TG/Discord
+    email = db.Column(db.String(100))
+    service = db.Column(db.String(100), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
-    def __repr__(self):
-        return f'<Order {self.name}>'
 
-# Создаём базу данных
 with app.app_context():
     db.create_all()
+
+# Отправка в Discord
+def send_discord(order):
+    if not WEBHOOK_URL:
+        print("⚠️ DISCORD_WEBHOOK_URL не задан")
+        return
+    
+    embed = {
+        "title": "🛒 Новый заказ!",
+        "color": 5865922,  # Discord blurple
+        "fields": [
+            {"name": "👤 Имя", "value": order.name, "inline": True},
+            {"name": "💬 Контакты", "value": order.contact, "inline": True},
+            {"name": "📧 Email", "value": order.email or "Не указан", "inline": True},
+            {"name": "📦 Услуга", "value": order.service, "inline": False},
+            {"name": "🕐 Время", "value": order.created_at.strftime('%d.%m.%Y %H:%M'), "inline": True}
+        ],
+        "footer": {"text": "Заказ с сайта"},
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    
+    try:
+        requests.post(WEBHOOK_URL, json={"embeds": [embed]}, timeout=10)
+        print(f"✅ Discord уведомление отправлено для {order.name}")
+    except Exception as e:
+        print(f"❌ Ошибка отправки в Discord: {e}")
 
 # Главная страница
 @app.route('/')
 def home():
     return render_template_string('''
         <!DOCTYPE html>
-        <html>
+        <html lang="ru">
         <head>
-            <title>Мой сайт</title>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Мои Услуги</title>
             <style>
+                * { box-sizing: border-box; margin: 0; padding: 0; }
                 body {
-                    font-family: Arial, sans-serif;
+                    font-family: 'Segoe UI', Arial, sans-serif;
                     background: #121212;
-                    color: white;
+                    color: #eee;
+                    padding: 20px;
+                    line-height: 1.6;
+                }
+                .container { max-width: 1000px; margin: 0 auto; }
+                h1 {
                     text-align: center;
-                    padding: 50px 20px;
+                    font-size: 42px;
+                    color: #7289da;
+                    margin: 30px 0 10px;
                 }
-                h1 { font-size: 48px; margin-bottom: 20px; }
-                p { font-size: 20px; color: #aaa; }
+                .subtitle {
+                    text-align: center;
+                    color: #aaa;
+                    font-size: 18px;
+                    margin-bottom: 40px;
+                }
+                
+                /* Карточки услуг */
                 .services {
-                    margin-top: 30px;
-                    display: flex;
-                    justify-content: center;
-                    gap: 30px;
-                    flex-wrap: wrap;
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+                    gap: 25px;
+                    margin: 40px 0;
                 }
-                .service {
+                .service-card {
                     background: #1e1e1e;
                     padding: 25px;
-                    border-radius: 10px;
-                    width: 220px;
-                    cursor: pointer;
+                    border-radius: 12px;
+                    border: 2px solid #2a2a2a;
+                    transition: border-color 0.3s;
+                    text-align: center;
                 }
-                .service h2 { color: #7289da; margin-bottom: 10px; }
-                .service .price {
-                    font-size: 24px;
+                .service-card:hover { border-color: #7289da; }
+                .service-card h3 {
+                    color: #7289da;
+                    font-size: 22px;
+                    margin-bottom: 12px;
+                }
+                .service-card p { color: #aaa; margin: 10px 0; }
+                .price {
+                    font-size: 28px;
                     font-weight: bold;
                     color: #43b581;
-                    margin: 10px 0;
+                    margin: 15px 0;
                 }
-                .order-form {
-                    background: #1e1e1e;
-                    padding: 40px;
-                    border-radius: 10px;
-                    margin-top: 50px;
-                    max-width: 500px;
-                    margin-left: auto;
-                    margin-right: auto;
-                }
-                .order-form h2 { color: #7289da; margin-bottom: 20px; }
-                .order-form input,
-                .order-form textarea {
-                    width: 100%;
-                    padding: 12px;
-                    margin: 10px 0;
-                    border: none;
-                    border-radius: 5px;
-                    background: #2a2a2a;
-                    color: white;
-                    font-size: 16px;
-                }
-                .order-form button {
-                    width: 100%;
-                    padding: 15px;
+                .order-btn {
                     background: #5865f2;
                     color: white;
                     border: none;
-                    border-radius: 5px;
-                    font-size: 18px;
+                    padding: 12px 30px;
+                    border-radius: 8px;
                     cursor: pointer;
-                    margin-top: 15px;
+                    font-size: 16px;
+                    transition: background 0.3s;
                 }
-                .order-form button:hover { background: #4752c4; }
-                .success { color: #43b581; font-size: 18px; margin-top: 15px; }
-                .admin-link {
-                    margin-top: 50px;
+                .order-btn:hover { background: #4752c4; }
+                
+                /* Модальное окно */
+                .modal {
+                    display: none;
+                    position: fixed;
+                    top: 0; left: 0;
+                    width: 100%; height: 100%;
+                    background: rgba(0,0,0,0.85);
+                    z-index: 1000;
+                    align-items: center;
+                    justify-content: center;
+                }
+                .modal.active { display: flex; }
+                .modal-content {
+                    background: #1e1e1e;
+                    padding: 30px;
+                    border-radius: 12px;
+                    width: 90%;
+                    max-width: 450px;
+                    border: 2px solid #7289da;
+                    position: relative;
+                }
+                .close {
+                    position: absolute;
+                    top: 12px; right: 20px;
+                    font-size: 28px;
+                    cursor: pointer;
                     color: #aaa;
+                }
+                .close:hover { color: #fff; }
+                .modal h2 {
+                    color: #7289da;
+                    margin-bottom: 20px;
+                    text-align: center;
+                }
+                .modal input {
+                    width: 100%;
+                    padding: 12px;
+                    margin: 10px 0;
+                    border: 1px solid #333;
+                    border-radius: 6px;
+                    background: #2a2a2a;
+                    color: #fff;
+                    font-size: 15px;
+                }
+                .modal input:focus {
+                    outline: none;
+                    border-color: #7289da;
+                }
+                .submit-btn {
+                    width: 100%;
+                    padding: 14px;
+                    background: #43b581;
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
+                    cursor: pointer;
+                    font-size: 16px;
+                    font-weight: bold;
+                    margin-top: 15px;
+                    transition: background 0.3s;
+                }
+                .submit-btn:hover { background: #3ba571; }
+                .success-msg {
+                    text-align: center;
+                    color: #43b581;
+                    margin-top: 15px;
+                    display: none;
+                }
+                
+                /* Админ ссылка */
+                .admin-link {
+                    display: block;
+                    text-align: center;
+                    margin-top: 50px;
+                    color: #7289da;
                     text-decoration: none;
                 }
+                .admin-link:hover { text-decoration: underline; }
             </style>
         </head>
         <body>
-            <h1>Привет, я Милкес</h1>
-            <p>Делаю ботов и сайты на заказ</p>
+            <div class="container">
+                <h1>🚀 Мои Услуги</h1>
+                <p class="subtitle">Делаю ботов и сайты на заказ</p>
+                
+                <div class="services">
+                    <div class="service-card">
+                        <h3>🤖 Discord Бот</h3>
+                        <p>Модерация, игры, уведомления</p>
+                        <div class="price">3 000₽</div>
+                        <button class="order-btn" onclick="openModal('Discord Бот')">Заказать</button>
+                    </div>
+                    <div class="service-card">
+                        <h3>📊 Парсер данных</h3>
+                        <p>Сбор информации с сайтов</p>
+                        <div class="price">5 000₽</div>
+                        <button class="order-btn" onclick="openModal('Парсер данных')">Заказать</button>
+                    </div>
+                    <div class="service-card">
+                        <h3>🌐 Сайт-визитка</h3>
+                        <p>Адаптивный дизайн, форма заявок</p>
+                        <div class="price">10 000₽</div>
+                        <button class="order-btn" onclick="openModal('Сайт-визитка')">Заказать</button>
+                    </div>
+                </div>
+                
+                <a href="/admin" class="admin-link">🔧 Админ-панель</a>
+            </div>
             
-            <div class="services">
-                <div class="service">
-                    <h2>Бот для Discord</h2>
-                    <div class="price">3000</div>
-                    <p>Модерация, игры, уведомления</p>
-                </div>
-                <div class="service">
-                    <h2>Парсер данных</h2>
-                    <div class="price">5000</div>
-                    <p>Сбор информации с сайтов</p>
-                </div>
-                <div class="service">
-                    <h2>Сайт-визитка</h2>
-                    <div class="price">10000</div>
-                    <p>Простой сайт для бизнеса</p>
+            <!-- Модальное окно -->
+            <div id="orderModal" class="modal">
+                <div class="modal-content">
+                    <span class="close" onclick="closeModal()">&times;</span>
+                    <h2>📋 Оформить заказ</h2>
+                    <form id="orderForm">
+                        <input type="text" id="name" placeholder="Ваше имя *" required>
+                        <input type="text" id="contact" placeholder="Telegram или Discord *" required>
+                        <input type="email" id="email" placeholder="Email (необязательно)">
+                        <input type="hidden" id="service">
+                        <button type="submit" class="submit-btn">Отправить заявку</button>
+                        <p class="success-msg" id="successMsg">✅ Заявка отправлена!</p>
+                    </form>
                 </div>
             </div>
             
-            <div class="order-form">
-                <h2>Оставить заявку</h2>
-                <form method="POST" action="/order">
-                    <input type="text" name="name" placeholder="Ваше имя" required>
-                    <input type="email" name="email" placeholder="Ваша почта" required>
-                    <input type="tel" name="phone" placeholder="Телефон (Не обязательно)">
-                    <textarea name="service" placeholder="Какая услуга нужна?" rows="4" required></textarea>
-                    <button type="submit">Отправить заявку</button>
-                </form>
-                {% if success %}
-                <div class="success">✅ Заявка отправлена! Свяжусь с тобой в ближайшее время.</div>
-                {% endif %}
-            </div>
-            
-            <a href="/admin" class="admin-link">Админ-панель</a>
+            <script>
+                function openModal(service) {
+                    document.getElementById('service').value = service;
+                    document.getElementById('orderModal').classList.add('active');
+                }
+                function closeModal() {
+                    document.getElementById('orderModal').classList.remove('active');
+                    document.getElementById('orderForm').reset();
+                    document.getElementById('successMsg').style.display = 'none';
+                }
+                
+                document.getElementById('orderForm').onsubmit = async function(e) {
+                    e.preventDefault();
+                    
+                    const btn = this.querySelector('.submit-btn');
+                    const originalText = btn.textContent;
+                    btn.textContent = 'Отправка...';
+                    btn.disabled = true;
+                    
+                    try {
+                        const response = await fetch('/order', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                name: document.getElementById('name').value,
+                                contact: document.getElementById('contact').value,
+                                email: document.getElementById('email').value,
+                                service: document.getElementById('service').value
+                            })
+                        });
+                        
+                        const result = await response.json();
+                        if (result.success) {
+                            document.getElementById('successMsg').style.display = 'block';
+                            setTimeout(() => {
+                                closeModal();
+                                btn.textContent = originalText;
+                                btn.disabled = false;
+                            }, 2000);
+                        }
+                    } catch (err) {
+                        alert('❌ Ошибка отправки. Попробуйте ещё раз.');
+                        btn.textContent = originalText;
+                        btn.disabled = false;
+                    }
+                };
+                
+                // Закрыть modal при клике вне
+                document.getElementById('orderModal').onclick = function(e) {
+                    if (e.target === this) closeModal();
+                };
+                // Закрыть по Escape
+                document.onkeydown = function(e) {
+                    if (e.key === 'Escape') closeModal();
+                };
+            </script>
         </body>
         </html>
     ''')
 
-# Обработка заказа
+# Обработка заказа (AJAX)
 @app.route('/order', methods=['POST'])
 def order():
-    name = request.form['name']
-    email = request.form['email']
-    phone = request.form.get('phone', 'Не указан')
-    service = request.form['service']
-    
-    # Сохраняем в базу данных
-    new_order = Order(name=name, email=email, phone=phone, service=service)
+    data = request.json
+    new_order = Order(
+        name=data['name'],
+        contact=data['contact'],
+        email=data.get('email', ''),
+        service=data['service']
+    )
     db.session.add(new_order)
     db.session.commit()
     
     # Отправка в Discord
-    if WEBHOOK_URL:
-        payload = {
-            "content": f"⚠ НОВЫЙ ЗАКАЗ!\nИмя: {name}\nПочта: {email}\nТелефон: {phone}\nУслуга: {service}"
-        }
-        try:
-            requests.post(WEBHOOK_URL, json=payload)
-        except:
-            print("❌ Не удалось отправить в Discord")
+    send_discord(new_order)
     
-    return render_template_string('''
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Заявка отправлена</title>
-            <style>
-                body {
-                    font-family: Arial, sans-serif;
-                    background: #121212;
-                    color: white;
-                    text-align: center;
-                    padding: 100px 20px;
-                }
-                h1 { color: #43b581; }
-                p { font-size: 20px; color: #aaa; }
-                a { color: #5865f2; text-decoration: none; }
-            </style>
-        </head>
-        <body>
-            <h1>✅ Заявка отправлена!</h1>
-            <p>Свяжусь с тобой в ближайшее время</p>
-            <p><a href="/">← Вернуться на главную</a></p>
-        </body>
-        </html>
-    ''')
+    return jsonify({'success': True})
 
 # Админ-панель
 @app.route('/admin')
 def admin():
     orders = Order.query.order_by(Order.created_at.desc()).all()
-    return render_template_string('''
+    rows = ''.join(f'''
+        <tr>
+            <td>{o.id}</td>
+            <td>{o.name}</td>
+            <td>{o.contact}</td>
+            <td>{o.email or '-'}</td>
+            <td>{o.service}</td>
+            <td>{o.created_at.strftime('%d.%m.%Y %H:%M')}</td>
+        </tr>
+    ''' for o in orders)
+    
+    return render_template_string(f'''
         <!DOCTYPE html>
         <html>
         <head>
             <title>Админ-панель</title>
             <style>
-                body {
-                    font-family: Arial, sans-serif;
-                    background: #121212;
-                    color: white;
-                    padding: 20px;
-                }
-                h1 { color: #7289da; }
-                table {
-                    width: 100%;
-                    border-collapse: collapse;
-                    margin-top: 20px;
-                }
-                th, td {
-                    border: 1px solid #333;
-                    padding: 12px;
-                    text-align: left;
-                }
-                th { background: #1e1e1e; color: #7289da; }
-                tr:nth-child(even) { background: #1a1a1a; }
-                .back { color: #5865f2; text-decoration: none; }
+                body {{ font-family: Arial, sans-serif; background: #121212; color: #fff; padding: 20px; }}
+                h1 {{ color: #7289da; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+                th, td {{ border: 1px solid #333; padding: 12px; text-align: left; }}
+                th {{ background: #1e1e1e; color: #7289da; }}
+                tr:nth-child(even) {{ background: #1a1a1a; }}
+                a {{ color: #5865f2; text-decoration: none; }}
             </style>
         </head>
         <body>
             <h1>📋 Все заказы</h1>
-            <a href="/" class="back">← На главную</a>
+            <p><a href="/">← На главную</a></p>
             <table>
-                <tr>
-                    <th>ID</th>
-                    <th>Имя</th>
-                    <th>Почта</th>
-                    <th>Телефон</th>
-                    <th>Услуга</th>
-                    <th>Дата</th>
-                </tr>
-                {% for order in orders %}
-                <tr>
-                    <td>{{ order.id }}</td>
-                    <td>{{ order.name }}</td>
-                    <td>{{ order.email }}</td>
-                    <td>{{ order.phone }}</td>
-                    <td>{{ order.service }}</td>
-                    <td>{{ order.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                </tr>
-                {% endfor %}
+                <tr><th>ID</th><th>Имя</th><th>Контакты</th><th>Email</th><th>Услуга</th><th>Дата</th></tr>
+                {rows}
             </table>
         </body>
         </html>
-    ''', orders=orders)
+    ''')
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 8000))
