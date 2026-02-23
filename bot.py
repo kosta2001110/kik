@@ -1,6 +1,7 @@
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.filters import Command
+from flask import Flask
+from threading import Thread
 import asyncio
 import os
 
@@ -108,3 +109,27 @@ async def main():
     print("✅ Бот запущен!")
     threading.Thread(target=run_flask, daemon=True).start()
     await dp.start_polling(bot)
+
+app = Flask(__name__)
+@app.route('/')
+def home():
+    return '''
+    <h1>🤖 Telegram Bot is Running!</h1>
+    <p>Бот работает 24/7 на Render</p>
+    <p><a href="https://t.me/Kroso_bot">Открыть бота в Telegram</a></p>
+    '''
+
+@app.route('/health')
+def health():
+    return 'ОК', 200
+
+def run_flask():
+    port = int(os.getenv('PORT', 8000))
+    print(f"🌐 Flask запущен на порту {port}")
+    app.run(host='0.0.0.0', port=port)
+
+if __name__ == '__main__':
+    bot_thread = Thread(target=lambda: asyncio.run(run.bot()), daemon=True)
+    bot_thread.start()
+
+    run_flask()
