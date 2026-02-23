@@ -5,7 +5,7 @@ import asyncio
 import os
 
 # Токен от BotFather
-TOKEN = os.getenv('TOKEN', '8529982995:AAEWg7v34cLxgKbDtTLY9ZUI2mRpxsTnfUE')
+TOKEN = os.getenv('TOKEN', 'TOKEN')
 
 print(f"🔑 Токен: {TOKEN[:20]}...")
 print("🤖 Запуск бота...")
@@ -89,3 +89,22 @@ if __name__ == '__main__':
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\n🛑 Бот остановлен")
+
+ # Для Render
+from flask import Flask
+import threading
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return 'Bot is running!'
+
+def run_flask():
+    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 8000)))
+
+# В main() добавь:
+async def main():
+    print("✅ Бот запущен!")
+    threading.Thread(target=run_flask, daemon=True).start()
+    await dp.start_polling(bot)
