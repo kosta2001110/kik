@@ -5,30 +5,24 @@ from threading import Thread
 import asyncio
 import os
 
-# Токен от BotFather
-TOKEN = os.getenv('TOKEN', 'TOKEN')
+# TOKEN
+TOKEN = os.getenv('TOKEN')
+print(f"🔑 Токен: {TOKEN[:20] if TOKEN else 'NOT SET'}...")
 
-print(f"🔑 Токен: {TOKEN[:20]}...")
-print("🤖 Запуск бота...")
-
-# Инициализация
+# Инициализация (aiogram 2.x)
 bot = Bot(token=TOKEN)
-dp = Dispatcher()
-
-# Курс юаня
+dp = Dispatcher(bot)  # ← Передаём bot!
 YUAN_RATE = 11.2
 
-# Клавиатура с кнопками (ИСПРАВЛЕНО для aiogram 3.x!)
 def get_category_keyboard():
     keyboard = [
         [InlineKeyboardButton(text='👟 Кроссовки', callback_data='sneakers')],
         [InlineKeyboardButton(text='👜 Сумка', callback_data='bag')],
         [InlineKeyboardButton(text='⌚ Часы', callback_data='watch')]
     ]
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+    return InlineKeyboardMarkup(row_width=1)
 
-# Обработчик /start
-@dp.message(Command("start"))
+@dp.message_handler(commands=['start'])
 async def start_command(message: types.Message):
     print(f"📩 /start от {message.from_user.username}")
     await message.answer(
@@ -37,42 +31,28 @@ async def start_command(message: types.Message):
         'Или выбери категорию:',
         reply_markup=get_category_keyboard()
     )
-    print("✅ Ответ отправлен")
 
-# Обработчик текста (числа)
-@dp.message(lambda message: message.text and message.text.replace('.', '').isdigit())
+@dp.message_handler(lambda message: message.text and message.text.replace('.', '').isdigit())
 async def calculate_price(message: types.Message):
     try:
         price = float(message.text)
         result = price * YUAN_RATE + 1350 + 1500
         print(f"🧮 {price} юаней = {result}₽")
         await message.answer(
-            f'💰 Расчёт:\n'
-            f'{price} × {YUAN_RATE} + 1350 + 1500 = **{result:.0f}₽**\n\n'
+            f'💰 Расчёт:\n{price} × {YUAN_RATE} + 1350 + 1500 = **{result:.0f}₽**\n\n'
             'Введи другую цену или нажми /start',
             parse_mode='Markdown'
         )
-    except Exception as e:
-        print(f"❌ Ошибка: {e}")
-        await message.answer('❌ Введи корректное число')
+    except:
+        await message.answer('❌ Введи корректное число (например: 214)')
 
-# Обработчик кнопок
-@dp.callback_query(lambda callback: callback.data)
+@dp.callback_query_handler()
 async def category_selected(callback: types.CallbackQuery):
     category = callback.data
-    delivery = {
-        'sneakers': 1350,
-        'bag': 850,
-        'watch': 500
-    }
-    names = {
-        'sneakers': '👟 Кроссовки',
-        'bag': '👜 Сумка',
-        'watch': '⌚ Часы'
-    }
+    delivery = {'sneakers': 1350, 'bag': 850, 'watch': 500}
+    names = {'sneakers': '👟 Кроссовки', 'bag': '👜 Сумка', 'watch': '⌚ Часы'}
     
     print(f"🔘 Категория: {category}")
-    
     await callback.message.answer(
         f'Выбрано: {names[category]}\n'
         f'Доставка: {delivery[category]}₽\n\n'
@@ -80,56 +60,28 @@ async def category_selected(callback: types.CallbackQuery):
     )
     await callback.answer()
 
-# Запуск
-async def main():
+async def run_bot():
     print("✅ Бот запущен! Ожидание сообщений...")
-    await dp.start_polling(bot)
+    await dp.start_polling()
 
-if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\n🛑 Бот остановлен")
-
- # Для Render
-from flask import Flask
-import threading
-
+# FLASK СЕРВЕР
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return 'Bot is running!'
-
-def run_flask():
-    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 8000)))
-
-# В main() добавь:
-async def main():
-    print("✅ Бот запущен!")
-    threading.Thread(target=run_flask, daemon=True).start()
-    await dp.start_polling(bot)
-
-app = Flask(__name__)
-@app.route('/')
-def home():
-    return '''
-    <h1>🤖 Telegram Bot is Running!</h1>
-    <p>Бот работает 24/7 на Render</p>
-    <p><a href="https://t.me/Kroso_bot">Открыть бота в Telegram</a></p>
-    '''
+    return '<h1>🤖 Telegram Bot is Running!</h1><p>Бот работает 24/7 на Render</p>'
 
 @app.route('/health')
 def health():
-    return 'ОК', 200
+    return 'OK', 200
 
 def run_flask():
     port = int(os.getenv('PORT', 8000))
     print(f"🌐 Flask запущен на порту {port}")
     app.run(host='0.0.0.0', port=port)
 
+# ЗАПУСК
 if __name__ == '__main__':
-    bot_thread = Thread(target=lambda: asyncio.run(run.bot()), daemon=True)
+    bot_thread = Thread(target=lambda: asyncio.run(run_bot()), daemon=True)
     bot_thread.start()
-
     run_flask()
